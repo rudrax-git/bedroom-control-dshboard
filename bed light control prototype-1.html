@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bed Control Pro</title>
+<style>
+:root {
+    --bg-color: #050505;
+    --panel-bg: #121212;
+    --btn-bg: #1f1f1f;
+    --text-main: #ffffff;
+    --text-dim: #666;
+    --accent: #ff9100;
+    --danger: #ff4444;
+    --success: #00e676;
+    --shadow: 0 0 30px rgba(0,0,0,0.5);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+body {
+    margin:0; padding:0; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center;
+    background: var(--bg-color); font-family: 'Segoe UI', Roboto, sans-serif; color: var(--text-main); overflow:hidden;
+}
+/* --- LOCK SCREEN --- */
+#lock-screen {
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center;
+    z-index:9999; transition: transform 0.5s cubic-bezier(0.4,0,0.2,1);
+}
+#lock-screen.unlocked { transform: translateY(-100%); }
+.lock-msg { color: var(--text-dim); margin-bottom:25px; letter-spacing:3px; font-weight:bold; text-transform:uppercase; }
+#patternCanvas { background:#0a0a0a; border-radius:24px; border:2px solid #222; touch-action:none; }
+
+/* --- DASHBOARD --- */
+.dashboard {
+    display: grid; grid-template-columns: 1.2fr 1fr; gap:30px;
+    width:96vw; height:92vh; padding:30px; border-radius:30px;
+    background: var(--panel-bg); box-shadow: var(--shadow); border:2px solid #222;
+}
+.control-panel { display:flex; flex-direction:column; justify-content:space-between; }
+header { display:flex; justify-content:space-between; align-items:center; }
+h1 { margin:0; font-size:1.3rem; color: var(--text-dim); letter-spacing:2px; text-transform:uppercase; }
+.clock { font-size:2.2rem; font-weight:200; }
+
+.status-badge {
+    font-size:0.8rem; font-weight:bold; padding:4px 12px; border-radius:20px;
+    background:#222; border:1px solid #333; color:#555; transition:0.3s;
+}
+.status-badge.on { color: var(--success); border-color: var(--success); box-shadow: 0 0 10px rgba(0,230,118,0.2);}
+.status-badge.off { color: var(--danger); border-color: var(--danger); }
+
+.relock-btn { width:50px;height:50px;border-radius:50%;border:1px solid #333; background:#222; color: var(--text-dim); font-size:1.2rem; cursor:pointer; }
+
+.power-row { display:grid; grid-template-columns:1fr 1fr; gap:20px; height:100px; margin-top:15px; }
+.btn { border:none; border-radius:20px; background: var(--btn-bg); color:#fff; font-size:1.6rem; font-weight:600; cursor:pointer; transition:0.2s; }
+.btn-on.active { border:2px solid var(--accent); color: var(--accent); box-shadow:0 0 20px rgba(255,145,0,0.3);}
+.btn-off.active { border:2px solid var(--danger); color: var(--danger); }
+
+.input-group { display:flex; flex-direction:column; gap:10px; margin-top:20px; }
+input[type=range] { width:100%; -webkit-appearance:none; background:transparent; padding:10px 0; }
+input[type=range]::-webkit-slider-runnable-track { height:26px; background:#222; border-radius:13px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:50px;height:50px; border-radius:50%; background:#eee; margin-top:-12px; box-shadow:0 5px 15px rgba(0,0,0,0.5); }
+
+#colorInput {
+    background:#000; border:1px solid #333; border-radius:12px;
+    padding:15px; color:#fff; width:100%; outline:none; user-select:text;
+}
+
+.voice-box { display:flex; align-items:center; gap:20px; margin-top:15px; background:#080808; border-radius:20px; padding:12px; border:1px solid #222; }
+.mic-btn { width:60px;height:60px;border-radius:50%; background:#222; border:2px solid #333; color:var(--accent); font-size:1.6rem; display:flex; justify-content:center; align-items:center; cursor:pointer;}
+.mic-btn.listening { background:var(--danger); color:#fff; animation:pulse 1.5s infinite;}
+
+@keyframes pulse {0%{box-shadow:0 0 0 0 rgba(255,68,68,0.7);}70%{box-shadow:0 0 0 15px rgba(255,68,68,0);}100%{box-shadow:0 0 0 0 rgba(255,68,68,0);}}
+
+/* --- VISUAL PANEL --- */
+.visual-panel { background:#0a0a0a; border-radius:25px; border:1px solid #222; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#wheel { width:300px;height:300px; cursor:crosshair; touch-action:none;}
+.presets { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:25px; width:85%; }
+.btn-sm { padding:15px; border:none; border-radius:12px; background:#1f1f1f; color:#aaa; cursor:pointer; }
+
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+    <div class="lock-msg">Pattern Required</div>
+    <canvas id="patternCanvas" width="340" height="340"></canvas>
+</div>
+
+<div class="dashboard">
+    <div class="control-panel">
+        <header>
+            <div>
+                <h1>Room Control</h1>
+                <span id="powerStatus" class="status-badge">Checking...</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:15px;">
+                <button class="relock-btn" onclick="relock()">🔒</button>
+                <div class="clock" id="clock">12:00</div>
+            </div>
+        </header>
+
+        <div class="power-row">
+            <button id="pwr-on" class="btn btn-on" onclick="cmd('on')">ON</button>
+            <button id="pwr-off" class="btn btn-off" onclick="cmd('off')">OFF</button>
+        </div>
+
+        <div class="input-group">
+            <input type="range" min="0" max="255" value="128" id="bri" oninput="debounceBri(this.value)">
+            <input type="text" id="colorInput" placeholder="Type color or Hex (#FF00FF)" onkeydown="if(event.key==='Enter') handleTextInput(this.value)">
+        </div>
+
+        <div class="voice-box">
+            <div class="mic-btn" id="micBtn">🎤</div>
+            <div id="voiceText" style="color:#555; font-style:italic;">Tap mic for voice...</div>
+        </div>
+    </div>
+
+    <div class="visual-panel">
+        <canvas id="wheel" width="300" height="300"></canvas>
+        <div class="presets">
+            <button class="btn-sm" onclick="cmd('warm')">Warm</button>
+            <button class="btn-sm" onclick="cmd('cool')">Cool</button>
+            <button class="btn-sm" onclick="cmd('party')">Party</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const BED_IP="192.168.1.101";
+const KEY_POINTS=[6,0,2,4,8]; // Sequential corners
+const KEY_POINTS_REVERSE=KEY_POINTS.slice().reverse(); // Reverse for bidirectional
+let activeRGB=[255,145,0], lightIsOn=false;
+let briTimer;
+
+// --- PATTERN LOCK ---
+const pCvs=document.getElementById('patternCanvas'), pCtx=pCvs.getContext('2d');
+const dots=[], currentPath=[], drag={x:0,y:0}, state={dragging:false};
+for(let r=0;r<3;r++) for(let c=0;c<3;c++) dots.push({id:r*3+c,x:60+c*110,y:60+r*110});
+
+function drawP(lCol="#444",hCol="rgba(255,145,0,0.2)"){
+    pCtx.clearRect(0,0,340,340);
+    if(currentPath.length>0){
+        pCtx.beginPath(); pCtx.lineWidth=12; pCtx.strokeStyle=lCol; pCtx.lineCap="round"; pCtx.lineJoin="round";
+        pCtx.moveTo(dots[currentPath[0]].x,dots[currentPath[0]].y);
+        for(let i=1;i<currentPath.length;i++) pCtx.lineTo(dots[currentPath[i]].x,dots[currentPath[i]].y);
+        if(state.dragging) pCtx.lineTo(drag.x,drag.y);
+        pCtx.stroke();
+    }
+    dots.forEach(d=>{
+        const act=currentPath.includes(d.id);
+        if(act){ pCtx.beginPath(); pCtx.arc(d.x,d.y,35,0,6.28); pCtx.fillStyle=hCol; pCtx.fill();}
+        pCtx.beginPath(); pCtx.arc(d.x,d.y,10,0,6.28); pCtx.fillStyle=act?"#fff":"#bbb"; pCtx.fill();
+        pCtx.strokeStyle="#888"; pCtx.lineWidth=2; pCtx.stroke();
+    });
+}
+
+function getP(e){
+    const r=pCvs.getBoundingClientRect();
+    const cx=e.clientX||(e.touches&&e.touches[0].clientX);
+    const cy=e.clientY||(e.touches&&e.touches[0].clientY);
+    return {x:cx-r.left, y:cy-r.top};
+}
+
+function handleStart(e){
+    const p=getP(e); state.dragging=true; currentPath.length=0; drag.x=p.x; drag.y=p.y;
+    const d=dots.find(dt=>Math.hypot(p.x-dt.x,p.y-dt.y)<40); if(d) currentPath.push(d.id);
+    drawP();
+}
+function handleMove(e){if(!state.dragging)return; e.preventDefault(); const p=getP(e); drag.x=p.x; drag.y=p.y;
+    const d=dots.find(dt=>Math.hypot(p.x-dt.x,p.y-dt.y)<40); if(d&&!currentPath.includes(d.id)) currentPath.push(d.id);
+    drawP();
+}
+function handleEnd(){if(!state.dragging)return; state.dragging=false;
+    let forwardMatch = false;
+    let matchIdx = 0;
+    currentPath.forEach(dot => { if (dot === KEY_POINTS[matchIdx]) matchIdx++; });
+    if (matchIdx === KEY_POINTS.length) forwardMatch = true;
+
+    let reverseMatch = false;
+    matchIdx = 0;
+    currentPath.forEach(dot => { if (dot === KEY_POINTS_REVERSE[matchIdx]) matchIdx++; });
+    if (matchIdx === KEY_POINTS_REVERSE.length) reverseMatch = true;
+
+    if(forwardMatch || reverseMatch){ drawP("#00e676","rgba(0,230,118,0.3)"); setTimeout(()=>document.getElementById('lock-screen').classList.add('unlocked'),400);}
+    else {drawP("#ff4444","rgba(255,68,68,0.3)"); setTimeout(()=>{currentPath.length=0; drawP();},800);}
+}
+pCvs.addEventListener('pointerdown',handleStart);
+pCvs.addEventListener('pointermove',handleMove);
+window.addEventListener('pointerup',handleEnd);
+drawP();
+
+function relock(){currentPath.length=0; drawP(); document.getElementById('lock-screen').classList.remove('unlocked');}
+
+// --- DASHBOARD ---
+async function updateStatus(){
+    try{
+        const res=await fetch(`http://${BED_IP}/json/state`);
+        const state=await res.json();
+        lightIsOn=state.on; activeRGB=state.seg[0].col[0];
+        const b=document.getElementById('powerStatus');
+        b.innerText=`Status: ${lightIsOn?'ON':'OFF'}`;
+        b.className=`status-badge ${lightIsOn?'on':'off'}`;
+        document.getElementById('pwr-on').classList.toggle('active', lightIsOn);
+        document.getElementById('pwr-off').classList.toggle('active', !lightIsOn);
+        drawWheel();
+    }catch(e){
+        const b=document.getElementById('powerStatus');
+        b.innerText="Status: OFFLINE"; b.className="status-badge off";
+    }
+}
+setInterval(updateStatus,3000);
+
+function cmd(a,v){
+    let p={};
+    if(a==='on') p={on:true};
+    if(a==='off') p={on:false};
+    if(a==='bri') p={bri:parseInt(v)};
+    if(a==='warm'){p={seg:[{col:[[255,160,90]],fx:0}]}; activeRGB=[255,160,90];}
+    if(a==='cool'){p={seg:[{col:[[200,220,255]],fx:0}]}; activeRGB=[200,220,255];}
+    if(a==='party'){p={seg:[{fx:9,sx:200}],bri:255};} // Enhanced party: Rainbow Runner with high speed and brightness
+    if(a==='color'){p={seg:[{col:[v],fx:0}]}; activeRGB=v;}
+    drawWheel();
+    fetch(`http://${BED_IP}/json/state`,{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p)});
+}
+
+// --- BRIGHTNESS DEBOUNCE ---
+function debounceBri(v){ clearTimeout(briTimer); briTimer=setTimeout(()=>cmd('bri',v),150); }
+
+// --- COLOR INPUT ---
+function handleTextInput(val){
+    const d=document.createElement("div"); d.style.color=val; document.body.appendChild(d);
+    const s=window.getComputedStyle(d).color; document.body.removeChild(d);
+    const m=s.match(/\d+/g); if(!m) return;
+    cmd('color', [parseInt(m[0]),parseInt(m[1]),parseInt(m[2])]);
+    document.getElementById('colorInput').value="";
+}
+
+// --- COLOR WHEEL ---
+const w=document.getElementById('wheel'), wCtx=w.getContext('2d');
+function drawWheel(){
+    wCtx.clearRect(0,0,300,300);
+    for(let i=0;i<360;i++){ wCtx.beginPath(); wCtx.moveTo(150,150); wCtx.arc(150,150,140,(i-90)*Math.PI/180,(i+1-90)*Math.PI/180); wCtx.fillStyle=`hsl(${i},100%,50%)`; wCtx.fill();}
+    const g=wCtx.createRadialGradient(150,150,0,150,150,140); g.addColorStop(0,'white'); g.addColorStop(1,'transparent');
+    wCtx.fillStyle=g; wCtx.beginPath(); wCtx.arc(150,150,140,0,6.28); wCtx.fill();
+    wCtx.beginPath(); wCtx.arc(150,150,60,0,6.28); wCtx.fillStyle="#050505"; wCtx.fill();
+    wCtx.beginPath(); wCtx.arc(150,150,50,0,6.28); wCtx.fillStyle=`rgb(${activeRGB[0]},${activeRGB[1]},${activeRGB[2]})`; wCtx.fill();
+    wCtx.shadowBlur=15; wCtx.shadowColor=`rgb(${activeRGB[0]},${activeRGB[1]},${activeRGB[2]})`; wCtx.stroke(); wCtx.shadowBlur=0;
+}
+drawWheel();
+w.addEventListener('pointerdown',e=>{
+    const r=w.getBoundingClientRect(), x=(e.clientX-r.left)*(300/r.width), y=(e.clientY-r.top)*(300/r.height);
+    if(Math.hypot(x-150,y-150)>60){
+        const d=wCtx.getImageData(x,y,1,1).data;
+        if(d[3]>0) cmd('color',[d[0],d[1],d[2]]);
+    }
+});
+
+// --- VOICE CONTROL ---
+const mic=document.getElementById('micBtn'), vTxt=document.getElementById('voiceText');
+if('webkitSpeechRecognition' in window){
+    const r=new webkitSpeechRecognition();
+    mic.onclick=()=>{r.start(); mic.classList.add('listening'); vTxt.innerText="Listening...";};
+    r.onresult=e=>{
+        const t=e.results[0][0].transcript.toLowerCase(); vTxt.innerText=`"${t}"`;
+        if(t.includes('on')) cmd('on');
+        else if(t.includes('off')) cmd('off');
+        else if(t.includes('red')) cmd('color',[255,0,0]);
+        else if(t.includes('blue')) cmd('color',[0,0,255]);
+        else if(t.includes('warm')) cmd('warm');
+        else if(t.includes('party')) cmd('party'); // Added voice for party
+    };
+    r.onend=()=>mic.classList.remove('listening');
+}
+
+// --- CLOCK ---
+setInterval(()=>document.getElementById('clock').innerText=new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),1000);
+</script>
+</body>
+</html>
